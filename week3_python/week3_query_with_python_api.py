@@ -2,6 +2,7 @@ import os
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import desc, col
 from pyspark.sql.functions import current_timestamp
+from pyiceberg import table
 
 # Load environment variables.
 from dotenv import load_dotenv
@@ -18,10 +19,25 @@ spark = SparkSession.builder \
     .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
     .config("spark.hadoop.fs.s3a.access.key", aws_access_key_id) \
     .config("spark.hadoop.fs.s3a.secret.key", aws_secret_access_key) \
-    .config('spark.jars.packages', 'org.apache.spark:spark-sql-kafka-0-10_2.12:3.1.3,org.apache.hadoop:hadoop-aws:3.2.0,com.amazonaws:aws-java-sdk-bundle:1.11.375') \
+    .config('spark.jars.packages', 'org.apache.spark:spark-sql-kafka-0-10_2.12:3.3.3,org.apache.hadoop:hadoop-aws:3.3.3,com.amazonaws:aws-java-sdk-bundle:1.12.367,org.apache.iceberg:iceberg-spark-runtime-3.3_2.12:1.4.0,org.apache.iceberg:iceberg-aws-bundle:1.4.0') \
+    .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
+    .config("hive.metastore.client.factory.class", "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory") \
     .master('local[*]') \
+    .enableHiveSupport() \
     .getOrCreate()
 
+# Configure Spark to use Iceberg
+#spark.conf.set("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+spark.conf.set("spark.sql.catalog.glue_catalog", "org.apache.iceberg.spark.SparkCatalog")
+spark.conf.set("spark.sql.catalog.glue_catalog.warehouse", "s3://hwe-fall-2023/mharris")
+spark.conf.set("spark.sql.catalog.glue_catalog.catalog-impl", "org.apache.iceberg.aws.glue.GlueCatalog")
+spark.conf.set("spark.sql.catalog.glue_catalog.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
+
+   # .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
+   # .config("spark.sql.catalog.glue_catalog", "org.apache.iceberg.spark.SparkCatalog") \
+   # .config("spark.sql.catalog.glue_catalog.warehouse", "s3://hwe-fall-2023/mharris/") \
+   # .config("spark.sql.catalog.glue_catalog.catalog-impl", "org.apache.iceberg.aws.glue.GlueCatalog") \
+   # .config("spark.sql.catalog.glue_catalog.io-impl", "org.apache.iceberg.aws.s3.S3FileIO") \
 #For Windows users, quiet errors about not being able to delete temporary directories which make your logs impossible to read...
 logger = spark.sparkContext._jvm.org.apache.log4j
 logger.LogManager.getLogger("org.apache.spark.util.ShutdownHookManager"). setLevel( logger.Level.OFF )
@@ -69,6 +85,25 @@ logger.LogManager.getLogger("org.apache.spark.SparkEnv"). setLevel( logger.Level
 #Write to S3 under s3a://hwe-$CLASS/$HANDLE/bronze/customers
 #Make sure to write it using overwrite mode: append will keep appending duplicates, which will cause problems in later labs...
 #There are no questions to answer about this data set right now, but you will use it in a later lab...
+#customers = spark.read.csv("resources/customers.tsv.gz", sep="\t", header=True)
+#customers.printSchema()
+#customers.write \
+#    .mode("overwrite") \
+#    .parquet("s3a://hwe-fall-2023/mharris/bronze/customers")
+
+#spark.catalog.setCurrentDatabase("hwe")
+
+spark.sql("CREATE DATABASE IF NOT EXISTS mharris")
+
+#print(db)
+
+#spark.sql("use hwe")
+spark.sql("create table mharris.mharris_iceberg (data string) using iceberg")
+
+# customers.write \
+#     .mode("overwrite") \
+#     .format("iceberg") \
+#     .save("s3a://hwe-fall-2023/mharris/bronze/customers-iceberg")
 
 # Stop the SparkSession
 spark.stop()
