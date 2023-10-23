@@ -7,6 +7,7 @@ from pyspark.sql.types import StructType, StructField, StringType, TimestampType
 from dotenv import load_dotenv
 load_dotenv()
 
+handle= os.environ.get("AWS_HANDLE")
 aws_access_key_id = os.environ.get("AWS_ACCESS_KEY_ID")
 aws_secret_access_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
 
@@ -31,19 +32,52 @@ logger.LogManager.getLogger("org.apache.spark.util.ShutdownHookManager"). setLev
 logger.LogManager.getLogger("org.apache.spark.SparkEnv"). setLevel( logger.Level.ERROR )
 
 #Define a Schema which describes the Parquet files under the silver reviews directory on S3
-silver_schema = None
+silver_schema = StructType([
+StructField("marketplace", StringType(), nullable=True)
+,StructField("customer_id", StringType(), nullable=True)
+,StructField("review_id", StringType(), nullable=True)
+,StructField("product_id", StringType(), nullable=True)
+,StructField("product_parent", StringType(), nullable=True)
+,StructField("product_title", StringType(), nullable=True)
+,StructField("product_category", StringType(), nullable=True)
+,StructField("star_rating", IntegerType(), nullable=True)
+,StructField("helpful_votes", IntegerType(), nullable=True)
+,StructField("total_votes", IntegerType(), nullable=True)
+,StructField("vine", StringType(), nullable=True)
+,StructField("verified_purchase", StringType(), nullable=True)
+,StructField("review_headline", StringType(), nullable=True)
+,StructField("review_body", StringType(), nullable=True)
+,StructField("purchase_date", StringType(), nullable=True)
+,StructField("review_timestamp", TimestampType(), nullable=True)
+,StructField("customer_name", StringType(), nullable=True)
+,StructField("gender", StringType(), nullable=True)
+,StructField("date_of_birth", StringType(), nullable=True)
+,StructField("city", StringType(), nullable=True)
+,StructField("state", StringType(), nullable=True)
+])
 
 #Define a streaming dataframe using readStream on top of the silver reviews directory on S3
-silver_data = None
+silver_data = spark.readStream \
+    .format("parquet") \
+    .schema(silver_schema) \
+    .load(f"s3a://hwe-fall-2023/{handle}/silver/reviews")
 
 #Define a watermarked_data dataframe by defining a watermark on the `review_timestamp` column with an interval of 10 seconds
-watermarked_data = None
+watermarked_data = silver_data \
+    .withWatermark("review_timestamp", "10 seconds") 
 
 #Define an aggregated dataframe using `groupBy` functionality to summarize that data over any dimensions you may find interesting
-aggregated_data = None
+aggregated_data = watermarked_data \
+    .groupBy("customer_id", "star_rating", "purchase_date", "product_id", "review_timestamp") \
+    .agg(count("*").alias("total"))
 
 #Write that aggregate data to S3 under s3a://hwe-$CLASS/$HANDLE/gold/fact_review using append mode and a checkpoint location of `/tmp/gold-checkpoint`
-write_gold_query = None
+write_gold_query = aggregated_data \
+    .writeStream \
+    .format("delta") \
+.option("outputMode", "append") \
+.option("path", f"s3a://hwe-fall-2023/{handle}/gold/fact_review") \
+.option("checkpointLocation", "/tmp/gold-checkpoint")
 
 write_gold_query.start().awaitTermination()
 
